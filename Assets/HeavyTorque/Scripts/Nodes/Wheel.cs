@@ -59,9 +59,9 @@ public class Wheel : VehicleNodeWithTorque {
 
 
     // Info
-    public float        AngularMomentum { get; private set; }                                                          // kg·m²/s
-    public float        AngularVelocity => AngularMomentum / GetInertia(InertiaFrom.Input, InertiaDirection.Upstream); // radians/s
-    public float        GroundSpeed     => AngularVelocity * radius;                                                   // m/s
+    public float        AngularMomentum => AngularVelocity * UpstreamInertia; // kg·m²/s
+    public float        AngularVelocity { get; private set; }                 // radians/s
+    public float        GroundSpeed     => AngularVelocity * radius;          // m/s
     public float        angle;
     public float        rotation;
     public VehicleInput brakeInput;
@@ -70,8 +70,10 @@ public class Wheel : VehicleNodeWithTorque {
     public Vector3 LateralDirection      => transform.right;
 
     // Computed properties
-    public float      SpinInertia   => 0.5f * mass * radius * radius; // kg·m²
-    public Quaternion WheelRotation => transform.rotation * Quaternion.AngleAxis(rotation * Rad2Deg, Vector3.right);
+    public  float      SpinInertia     => 0.5f * mass * radius * radius; // kg·m²
+    public  Quaternion WheelRotation   => transform.rotation * Quaternion.AngleAxis(rotation * Rad2Deg, Vector3.right);
+    
+    private float      UpstreamInertia => GetInertia(InertiaFrom.Input, InertiaDirection.Upstream);
 
     private float _appliedTorque;
     private float _appliedTorqueLastTick;
@@ -92,7 +94,7 @@ public class Wheel : VehicleNodeWithTorque {
         transform.localRotation = Quaternion.AngleAxis(angle, transform.up);
 
         // Wheel torque and friction
-        AngularMomentum        += _appliedTorque * deltaTime;
+        AngularVelocity        += _appliedTorque / UpstreamInertia * deltaTime;
         _appliedTorqueLastTick =  _appliedTorque;
         _appliedTorque         =  0;
 
@@ -135,15 +137,14 @@ public class Wheel : VehicleNodeWithTorque {
                 ForceMode.Impulse
             );
 
-            AngularMomentum -= tireRoadDifference
+            AngularVelocity -= tireRoadDifference
                 / radius
-                * GetInertia(InertiaFrom.Input, InertiaDirection.Upstream)
                 * deltaTime
                 * simpleLongitudinalFrictionBlend;
 
             // Apply forces to the vehicle
             vehicle.Rigidbody.AddForceAtPosition(LongitudinalDirection * (_longitudinalForce * deltaTime), transform.position, ForceMode.Impulse);
-            AngularMomentum -= _longitudinalForce * radius * deltaTime; // Apply an opposing torque to the wheel
+            AngularVelocity -= _longitudinalForce * radius * deltaTime / UpstreamInertia; // Apply an opposing torque to the wheel
 
             // TODO: Varify that this force should be applied in this direction
             vehicle.Rigidbody.AddForceAtPosition(transform.right * (_lateralForce * deltaTime), transform.position, ForceMode.Impulse);
@@ -162,7 +163,7 @@ public class Wheel : VehicleNodeWithTorque {
         if (Abs(AngularVelocity) > 0 && brakeInput) {
             var breakTorque        = brakeInput.ReadFloat() * brakeForce;
             var appliedBrakeTorque = Sign(AngularVelocity) * Min(Abs(breakTorque), Abs(AngularMomentum / deltaTime));
-            AngularMomentum -= appliedBrakeTorque * deltaTime;
+            AngularVelocity -= appliedBrakeTorque * deltaTime / UpstreamInertia;
         }
 
         // Update rotation and visual
@@ -179,7 +180,7 @@ public class Wheel : VehicleNodeWithTorque {
                 _appliedTorque += torqueForce;
                 break;
             case TorqueMode.Impulse:
-                AngularMomentum += torqueForce;
+                AngularVelocity += torqueForce / UpstreamInertia;
                 break;
         }
     }

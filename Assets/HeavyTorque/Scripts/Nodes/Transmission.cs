@@ -39,8 +39,10 @@ public class Transmission : VehicleNodeWithTorque {
 
     // Terminal angular momentum for neutral gear
     private float _appliedTorqueForce;
-    public  float AngularMomentum { get; private set; }                                                                  // kg·m²/s
-    public  float AngularVelocity => AngularMomentum / source.GetInertia(InertiaFrom.Output, InertiaDirection.Upstream); // radians/s
+    public  float AngularMomentum => AngularVelocity * UpstreamInertia; // kg·m²/s
+    public  float AngularVelocity { get; private set; }                 // radians/s
+
+    private float UpstreamInertia => source.GetInertia(InertiaFrom.Input, InertiaDirection.Upstream);
 
     private void OnValidate() {
         if (gearRatios == null || gearRatios.Length < 2) gearRatios = new float[] { -2.92f, 0f, 2.5f };
@@ -49,27 +51,17 @@ public class Transmission : VehicleNodeWithTorque {
 
     public override void Tick(float deltaTime) {
         var stopwatch = Stopwatch.StartNew();
-        
-        if (currentGear == NeutralGearIndex) AngularMomentum += _appliedTorqueForce * deltaTime;
+
+        if (currentGear == NeutralGearIndex) AngularVelocity += _appliedTorqueForce * deltaTime / UpstreamInertia;
         _appliedTorqueForce = 0;
-        
+
         stopwatch.Stop();
         vehicle.transmissionTime += (float)stopwatch.Elapsed.TotalMilliseconds;
     }
 
     public void SetGear(int gear) {
-        if (gear == NeutralGearIndex) {
-            // TODO: This is a bit of a weird way to achieve energy conservation. It'd be nicer to calculate how much momentum is
-            // left in the transmission vs the destination and then applying an inverse torque of the transmission to the destination. 
-            var upstreamMomentum = GetUpstreamAngularVelocity() * source.GetInertia(InertiaFrom.Output, InertiaDirection.Upstream);
-            AngularMomentum = upstreamMomentum;
-            var downstreamVelocity = destination.GetUpstreamAngularVelocity();
-            currentGear = Mathf.Clamp(gear, 0, gearRatios.Length - 1);
-            var downstreamInertia        = destination.GetInertia(InertiaFrom.Input, InertiaDirection.Downstream);
-            var targetDownstreamMomentum = downstreamVelocity * downstreamInertia;
-            var actualDownstreamMomentum = destination.GetUpstreamAngularVelocity() * downstreamInertia;
-            destination.ApplyDownstreamTorque(targetDownstreamMomentum - actualDownstreamMomentum, TorqueMode.Impulse);
-        }
+        if (gear == NeutralGearIndex)
+            AngularVelocity = GetUpstreamAngularVelocity();
 
         currentGear = Mathf.Clamp(gear, 0, gearRatios.Length - 1);
     }
@@ -82,7 +74,7 @@ public class Transmission : VehicleNodeWithTorque {
                     _appliedTorqueForce += torque;
                     break;
                 case TorqueMode.Impulse:
-                    AngularMomentum += torque;
+                    AngularVelocity += torque / UpstreamInertia;
                     break;
             }
 
