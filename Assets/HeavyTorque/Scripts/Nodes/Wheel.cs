@@ -2,6 +2,7 @@
 using UnityEditor;
 #endif
 
+using System.Diagnostics;
 using System.Linq;
 
 using UdonSharp;
@@ -27,10 +28,9 @@ public class Wheel : VehicleNodeWithTorque {
     private const float CShapeLateral      = 1.3f;
 
     [Header("Setup")]
-    public Vehicle vehicle;
     public VehicleNodeWithTorque connection;
-    public Steering              steering;
-    public Suspension            suspension;
+    public Steering   steering;
+    public Suspension suspension;
 
     public GameObject visual;
 
@@ -59,11 +59,11 @@ public class Wheel : VehicleNodeWithTorque {
 
 
     // Info
-    public float AngularMomentum { get; private set; }                                                          // kg·m²/s
-    public float AngularVelocity => AngularMomentum / GetInertia(InertiaFrom.Input, InertiaDirection.Upstream); // radians/s
-    public float GroundSpeed     => AngularVelocity * radius;                                                   // m/s
-    public float angle;
-    public float rotation;
+    public float        AngularMomentum { get; private set; }                                                          // kg·m²/s
+    public float        AngularVelocity => AngularMomentum / GetInertia(InertiaFrom.Input, InertiaDirection.Upstream); // radians/s
+    public float        GroundSpeed     => AngularVelocity * radius;                                                   // m/s
+    public float        angle;
+    public float        rotation;
     public VehicleInput brakeInput;
 
     public Vector3 LongitudinalDirection => transform.forward;
@@ -87,6 +87,8 @@ public class Wheel : VehicleNodeWithTorque {
     }
 
     public override void Tick(float deltaTime) {
+        var stopwatch = Stopwatch.StartNew();
+
         transform.localRotation = Quaternion.AngleAxis(angle, transform.up);
 
         // Wheel torque and friction
@@ -95,8 +97,6 @@ public class Wheel : VehicleNodeWithTorque {
         _appliedTorque         =  0;
 
         if (suspension.contacting) {
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            
             var axleVelocity = vehicle.Rigidbody.GetPointVelocity(transform.position);
 
             // var hitInfo      = suspension.HitInfo;
@@ -116,13 +116,30 @@ public class Wheel : VehicleNodeWithTorque {
 
             // Calculate combined forces
             PacejkaCombined(Max(0, suspension.Force), _longitudinalSlipRatio, _lateralSlipAngle, out _longitudinalForce, out _lateralForce);
-            _longitudinalForce *= Clamp01(Abs(tireRoadDifference));
-            _lateralForce      *= Clamp01(Abs(lateralAxleSpeed) * 2);
+            _lateralForce *= Clamp01(Abs(lateralAxleSpeed) * 2);
 
-            // Stop sliding at slow speeds
-            var simpleLateralFriction = Vector3.Dot(Vector3.ProjectOnPlane(suspension.Force * suspension.transform.up, Vector3.up), transform.right);
+            // Blend to simple models when at low speeds as the Pacejka model does not handle static friction
+            var simpleLateralFriction = Vector3.Dot(Vector3.ProjectOnPlane(suspension.Force * suspension.transform.up, Vector3.up), LateralDirection);
             simpleLateralFriction =  Clamp(Abs(simpleLateralFriction), 0, dPeak * suspension.Force) * -Sign(simpleLateralFriction);
             _lateralForce         += simpleLateralFriction * (1 - Clamp01(Abs(lateralAxleSpeed * 2)));
+
+            var simpleLongitudinalFriction = Vector3.Dot(Vector3.ProjectOnPlane(suspension.Force * suspension.transform.up, Vector3.up), LongitudinalDirection);
+            simpleLongitudinalFriction = Clamp(Abs(simpleLongitudinalFriction), 0, dPeak * suspension.Force) * -Sign(simpleLongitudinalFriction);
+            var simpleLongitudinalFrictionBlend = 1 - Clamp01(Abs(tireRoadDifference) * 0.2f);
+            simpleLongitudinalFriction += tireRoadDifference * suspension.Force * 0.2f;
+            _longitudinalForce         *= 1 - simpleLongitudinalFrictionBlend;
+
+            vehicle.Rigidbody.AddForceAtPosition(
+                simpleLongitudinalFriction * simpleLongitudinalFrictionBlend * LongitudinalDirection * deltaTime,
+                transform.position,
+                ForceMode.Impulse
+            );
+
+            AngularMomentum -= tireRoadDifference
+                / radius
+                * GetInertia(InertiaFrom.Input, InertiaDirection.Upstream)
+                * deltaTime
+                * simpleLongitudinalFrictionBlend;
 
             // Apply forces to the vehicle
             vehicle.Rigidbody.AddForceAtPosition(LongitudinalDirection * (_longitudinalForce * deltaTime), transform.position, ForceMode.Impulse);
@@ -135,14 +152,11 @@ public class Wheel : VehicleNodeWithTorque {
             var bSlipSpeed     = bAligning * lateralAxleSpeed;
             var aligningTorque = dAligning * suspension.Force * Sin(cAligning * Atan(bSlipSpeed - eAligning * (bSlipSpeed - Atan(bSlipSpeed))));
             if (steering) steering.ApplyDownstreamTorque(-aligningTorque * Abs(lateralAxleSpeed), TorqueMode.Force);
-            
-            stopwatch.Stop();
-            vehicle.wheelTime += (float)stopwatch.Elapsed.TotalMilliseconds;
         }
 
         // Axle friction
         // TODO: Without axle friction the wheel slowly accelerates
-        AngularMomentum -= Clamp(axleFrictionForce * deltaTime, 0, Abs(AngularMomentum)) * Sign(AngularMomentum);
+        // AngularMomentum -= Clamp(axleFrictionForce * deltaTime, 0, Abs(AngularMomentum)) * Sign(AngularMomentum);
 
         // Braking
         if (Abs(AngularVelocity) > 0 && brakeInput) {
@@ -154,6 +168,9 @@ public class Wheel : VehicleNodeWithTorque {
         // Update rotation and visual
         rotation                  += AngularVelocity * deltaTime;
         visual.transform.rotation =  WheelRotation;
+
+        stopwatch.Stop();
+        vehicle.wheelTime += (float)stopwatch.Elapsed.TotalMilliseconds;
     }
 
     public override void ApplyDownstreamTorque(float torqueForce, TorqueMode forceMode) {

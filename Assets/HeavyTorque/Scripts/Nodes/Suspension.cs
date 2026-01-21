@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEditor;
 #endif
 
+using static UnityEngine.Mathf;
 
 [ExecuteInEditMode, UdonBehaviourSyncMode(BehaviourSyncMode.None),]
 public class Suspension : VehicleNode {
@@ -26,28 +27,22 @@ public class Suspension : VehicleNode {
 
     public float Force => stiffness * (restLength - currentLength);
 
-    public float velocity;
-
     public RaycastHit HitInfo;
     public bool       contacting;
 
     private void Awake() { currentLength = restLength; }
 
-    public override void Tick(float deltaTime) {
-        velocity += Force / wheel.mass * deltaTime;
-        velocity -= velocity * damping * deltaTime;
-
-        // Apply suspension velocity
-        currentLength += velocity * deltaTime;
-
-        var hit = Physics.Raycast(transform.position, -transform.up, out HitInfo, currentLength + wheel.radius, groundLayer);
-        contacting = hit && HitInfo.distance < currentLength + wheel.radius;
-
+    private void FixedUpdate() {
+        contacting = Physics.Raycast(transform.position, -transform.up, out HitInfo, restLength + wheel.radius, groundLayer);
         if (contacting) {
-            currentLength = HitInfo.distance - wheel.radius;
-
-            var force = transform.up * (Force * deltaTime);
-            wheel.vehicle.Rigidbody.AddForceAtPosition(force, transform.position, ForceMode.Impulse);
+            var newLength    =  HitInfo.distance - wheel.radius;
+            var velocity     = (newLength - currentLength) / Time.fixedDeltaTime;
+            currentLength = newLength;
+            var dampingForce = Max(0, velocity * damping);
+            wheel.vehicle.Rigidbody.AddForceAtPosition(transform.up * (Force - dampingForce), transform.position);
+        }
+        else {
+            currentLength = restLength;
         }
     }
 

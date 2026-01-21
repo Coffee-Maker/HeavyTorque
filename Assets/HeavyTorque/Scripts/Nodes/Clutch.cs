@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using UdonSharp;
 
 using UnityEngine;
@@ -22,21 +24,30 @@ public class Clutch : VehicleNodeWithTorque {
     public float RelativeAngularVelocity => AngularVelocity - output.GetUpstreamAngularVelocity();
 
     private float _appliedTorque;
-    private float Engagement => 1 - engagementInput.ReadFloat();
+    private float _engagement;
 
     public override void Tick(float deltaTime) {
+        var newEngagement = 1 - (engagementInput ? engagementInput.ReadFloat() : 0f);
+        var engagementDelta = newEngagement - _engagement;
+        _engagement = newEngagement;
+        
+        var stopwatch = Stopwatch.StartNew();
+        
         AngularMomentum += _appliedTorque * deltaTime;
         _appliedTorque  =  0;
 
         var relativeVelocity = RelativeAngularVelocity;
         var totalInertia     = GetTotalInertia();
 
-        var clutchTorque = Clamp(friction * clampForce * Engagement * deltaTime, 0, Abs(relativeVelocity * totalInertia))
+        var clutchTorque = Clamp(friction * clampForce * _engagement * deltaTime, 0, Abs(relativeVelocity * totalInertia))
             * Sign(relativeVelocity)
             * 0.5f;
 
         AngularMomentum -= clutchTorque;
         output.ApplyDownstreamTorque(clutchTorque / deltaTime, TorqueMode.Force);
+        
+        stopwatch.Stop();
+        vehicle.clutchTime += (float)stopwatch.Elapsed.TotalMilliseconds;
     }
 
     private float GetTotalInertia() {
@@ -57,15 +68,13 @@ public class Clutch : VehicleNodeWithTorque {
     }
 
     public override float GetInertia(InertiaFrom from, InertiaDirection direction) {
-        var engagement = engagementInput ? engagementInput.ReadFloat() : 0f;
-
         if (direction == InertiaDirection.Upstream) {
             var inputInertia = input ? input.GetInertia(InertiaFrom.Output, InertiaDirection.Upstream) : 0;
-            return from == InertiaFrom.Input ? inputInertia : inputInertia * engagement;
+            return from == InertiaFrom.Input ? inputInertia : inputInertia * _engagement;
         }
 
         var outputInertia = output ? output.GetInertia(InertiaFrom.Input, InertiaDirection.Downstream) : 0;
-        return from == InertiaFrom.Input ? outputInertia * engagement * engagement : outputInertia;
+        return from == InertiaFrom.Output ? outputInertia : outputInertia * _engagement;
     }
 
     public override float GetDownstreamAngularVelocity() => AngularVelocity;

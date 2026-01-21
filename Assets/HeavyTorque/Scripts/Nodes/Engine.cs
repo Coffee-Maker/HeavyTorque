@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using UdonSharp;
 
 using UnityEngine;
@@ -27,6 +29,8 @@ public class Engine : VehicleNodeWithTorque {
     public float Torque => SimpleThrottleModel(throttleInput.ReadFloat());
 
     public override void Tick(float deltaTime) {
+        var stopwatch = Stopwatch.StartNew();
+
         var idleThrottle                = 0f;
         if (Rpm < idleRpm) idleThrottle = 1 - Rpm / idleRpm + 0.5f;
         var throttle                    = Rpm > limitRpm ? 0 : Lerp(idleThrottle, 1, throttleInput.ReadFloat());
@@ -34,6 +38,9 @@ public class Engine : VehicleNodeWithTorque {
         var systemAngularMomentum       = GetDownstreamAngularVelocity() * GetInertia(InertiaFrom.Input, InertiaDirection.Downstream);
         var frictionTorque              = Clamp(frictionForce * deltaTime, 0, Abs(systemAngularMomentum)) * -Sign(systemAngularMomentum) / deltaTime;
         ApplyDownstreamTorque(torque + frictionTorque, TorqueMode.Force);
+
+        stopwatch.Stop();
+        vehicle.engineTime += (float)stopwatch.Elapsed.TotalMilliseconds;
     }
 
     public float SimpleThrottleModel(float throttle) => Lerp(noThrottle.Evaluate(Rpm), fullThrottle.Evaluate(Rpm), throttle);

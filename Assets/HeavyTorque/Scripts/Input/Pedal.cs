@@ -7,6 +7,7 @@ using UnityEngine;
 using VRC.SDKBase;
 using VRC.Udon.Common;
 
+using static UnityEngine.Mathf;
 
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class Pedal : VehicleInput {
@@ -15,11 +16,14 @@ public class Pedal : VehicleInput {
     public  PedalType pedalType;
     public KeyCode desktopKey;
 
+    public float automatedBlend; // 0 = manual, 1 = automated
+    public float automatedInput;
+
     protected override void OnRevokeControl() { _input = 0f; }
 
-    public override float ReadFloat() => _input;
+    public override float ReadFloat() => Lerp(_input, automatedInput, automatedBlend);
 
-    public override int ReadInt() => _input > 0.5f ? 1 : 0;
+    public override int ReadInt() => ReadFloat() > 0.5f ? 1 : 0;
 
     private void Update() {
         if(!InControl || InVR) return;

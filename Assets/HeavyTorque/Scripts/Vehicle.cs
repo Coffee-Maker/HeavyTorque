@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using UdonSharp;
 
 using UnityEngine;
@@ -28,10 +30,20 @@ public class Vehicle : UdonSharpBehaviour {
 
     private VehicleNode[] _vehicleNodes;
 
+    public float totalTime;
+    public float engineTime;
+    public float clutchTime;
+    public float transmissionTime;
     public float wheelTime;
+    public float steeringTime;
+    public int   frames;
 
     private void Start() {
-        _vehicleNodes         = GetComponentsInChildren<VehicleNode>();
+        _vehicleNodes = GetComponentsInChildren<VehicleNode>();
+
+        foreach (var node in _vehicleNodes)
+            node.vehicle = this;
+
         Rigidbody.drag        = 0;
         Rigidbody.angularDrag = 0;
     }
@@ -44,11 +56,15 @@ public class Vehicle : UdonSharpBehaviour {
 
         var dt = Time.fixedDeltaTime / substeps;
 
-        wheelTime = 0;
+        var stopwatch = Stopwatch.StartNew();
 
         for (var i = 0; i < substeps; i++)
             foreach (var node in _vehicleNodes)
                 node.Tick(dt);
+
+        stopwatch.Stop();
+        totalTime += (float)stopwatch.Elapsed.TotalMilliseconds;
+        frames++;
     }
 
 #if UNITY_EDITOR && !COMPILER_UDONSHARP

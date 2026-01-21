@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using UdonSharp;
 
 using static UnityEngine.Mathf;
@@ -21,6 +23,8 @@ public class Steering : VehicleNodeWithTorque {
     private float _appliedTorque;
 
     public override void Tick(float deltaTime) {
+        var stopwatch = Stopwatch.StartNew();
+
         var steeringAngleInput = steeringInput ? steeringInput.ReadFloat() : 0f;
         steeringAngleInput = Clamp(steeringAngleInput, -maxSteeringAngle, maxSteeringAngle);
         var targetDelta = steeringAngleInput - angle;
@@ -29,7 +33,9 @@ public class Steering : VehicleNodeWithTorque {
         var timeToStop   = Abs(angularMomentum) / manualTorque;
         var timeToTarget = Approximately(angularMomentum, 0) ? float.MaxValue : targetDelta / AngularVelocity;
 
-        angularMomentum += manualTorque * (timeToStop < timeToTarget ? Sign(angularMomentum) : -Sign(angularMomentum)) * deltaTime;
+        var downstreamInertia   = GetInertia(InertiaFrom.Input, InertiaDirection.Downstream);
+        var clampedManualTorque = Min(manualTorque * deltaTime, Abs(targetDelta * downstreamInertia / deltaTime - angularMomentum));
+        angularMomentum += clampedManualTorque * (timeToStop < timeToTarget ? Sign(angularMomentum) : -Sign(angularMomentum));
 
         // Apply external torque
         angularMomentum += _appliedTorque * deltaTime;
@@ -43,6 +49,9 @@ public class Steering : VehicleNodeWithTorque {
         }
 
         foreach (var wheel in wheels) wheel.angle = angle;
+
+        stopwatch.Stop();
+        vehicle.steeringTime += (float)stopwatch.Elapsed.TotalMilliseconds;
     }
 
     public override void ApplyDownstreamTorque(float torqueForce, TorqueMode forceMode) {

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using UdonSharp;
 
 using UnityEngine;
@@ -46,8 +48,13 @@ public class Transmission : VehicleNodeWithTorque {
     }
 
     public override void Tick(float deltaTime) {
+        var stopwatch = Stopwatch.StartNew();
+        
         if (currentGear == NeutralGearIndex) AngularMomentum += _appliedTorqueForce * deltaTime;
         _appliedTorqueForce = 0;
+        
+        stopwatch.Stop();
+        vehicle.transmissionTime += (float)stopwatch.Elapsed.TotalMilliseconds;
     }
 
     public void SetGear(int gear) {
