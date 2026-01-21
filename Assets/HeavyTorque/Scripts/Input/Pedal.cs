@@ -3,18 +3,21 @@
 using UdonSharp;
 
 using UnityEngine;
+using UnityEngine.Serialization;
 
 using VRC.SDKBase;
 using VRC.Udon.Common;
 
 using static UnityEngine.Mathf;
 
+
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class Pedal : VehicleInput {
     private float     _input;
     public  HandType  hand;
     public  PedalType pedalType;
-    public KeyCode desktopKey;
+    public  KeyCode   desktopKey;
+    public  float     desktopModeDuration = 1;
 
     public float automatedBlend; // 0 = manual, 1 = automated
     public float automatedInput;
@@ -26,8 +29,8 @@ public class Pedal : VehicleInput {
     public override int ReadInt() => ReadFloat() > 0.5f ? 1 : 0;
 
     private void Update() {
-        if(!InControl || InVR) return;
-        _input = Input.GetKey(desktopKey) ? 1f : 0f;
+        if (!InControl || InVR) return;
+        _input = MoveTowards(_input, Input.GetKey(desktopKey) ? 1f : 0f, Time.deltaTime / desktopModeDuration);
     }
 
     public override void InputUse(bool value, UdonInputEventArgs args) {
@@ -47,7 +50,7 @@ public class Pedal : VehicleInput {
                 break;
         }
     }
-    
+
     public override void InputMoveHorizontal(float value, UdonInputEventArgs args) {
         if (!InVR || args.handType != hand || !InControl) return;
 
