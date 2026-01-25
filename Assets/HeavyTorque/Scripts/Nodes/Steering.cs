@@ -15,8 +15,8 @@ public class Steering : VehicleNodeWithTorque {
     public float manualTorque;
     public float maxSteeringAngle = 30f;
     public float angle;
-    public float angularMomentum;
-    public float AngularVelocity => angularMomentum / GetInertia(InertiaFrom.Input, InertiaDirection.Downstream);
+    public float AngularVelocity { get; private set; } // radians/s
+    public float AngularMomentum => AngularVelocity * GetInertia(InertiaFrom.Input, InertiaDirection.Downstream);
 
     public VehicleInput steeringInput;
 
@@ -29,23 +29,22 @@ public class Steering : VehicleNodeWithTorque {
         steeringAngleInput = Clamp(steeringAngleInput, -maxSteeringAngle, maxSteeringAngle);
         var targetDelta = steeringAngleInput - angle;
 
-        // Apply manual torque so we reach the target angle with 0 velocity
-        var timeToStop   = Abs(angularMomentum) / manualTorque;
-        var timeToTarget = Approximately(angularMomentum, 0) ? float.MaxValue : targetDelta / AngularVelocity;
-
-        var downstreamInertia   = GetInertia(InertiaFrom.Input, InertiaDirection.Downstream);
-        var clampedManualTorque = Min(manualTorque * deltaTime, Abs(targetDelta * downstreamInertia / deltaTime - angularMomentum));
-        angularMomentum += clampedManualTorque * (timeToStop < timeToTarget ? Sign(angularMomentum) : -Sign(angularMomentum));
-
         // Apply external torque
-        angularMomentum += _appliedTorque * deltaTime;
+        var downstreamInertia   = GetInertia(InertiaFrom.Input, InertiaDirection.Downstream);
+        AngularVelocity += _appliedTorque * deltaTime / downstreamInertia;
         _appliedTorque  =  0;
+        
+        // Apply manual torque so we reach the target angle with 0 velocity
+        var timeToStop   = Abs(AngularMomentum) / manualTorque;
+        var timeToTarget = Approximately(AngularVelocity, 0) ? float.MaxValue : targetDelta / AngularVelocity;
+        var clampedManualChange = Min(manualTorque * deltaTime / downstreamInertia, Abs(targetDelta / deltaTime - AngularVelocity));
+        AngularVelocity += clampedManualChange * (timeToStop < timeToTarget ? Sign(AngularVelocity) : -Sign(AngularVelocity));
 
-        angle += angularMomentum * deltaTime;
+        angle += AngularVelocity * deltaTime;
 
         if (Abs(angle) > maxSteeringAngle) {
             angle           =  Sign(angle) * maxSteeringAngle;
-            angularMomentum *= 0.5f;
+            AngularVelocity *= 0.5f;
         }
 
         foreach (var wheel in wheels) wheel.angle = angle;
@@ -60,7 +59,7 @@ public class Steering : VehicleNodeWithTorque {
                 _appliedTorque += torqueForce;
                 break;
             case TorqueMode.Impulse:
-                angularMomentum += torqueForce;
+                AngularVelocity += torqueForce / GetInertia(InertiaFrom.Input, InertiaDirection.Downstream);
                 break;
         }
     }
@@ -75,7 +74,7 @@ public class Steering : VehicleNodeWithTorque {
         return 0f;
     }
 
-    public override float GetDownstreamAngularVelocity() => angularMomentum;
+    public override float GetDownstreamAngularVelocity() => AngularVelocity;
 
-    public override float GetUpstreamAngularVelocity() => angularMomentum;
+    public override float GetUpstreamAngularVelocity() => AngularVelocity;
 }

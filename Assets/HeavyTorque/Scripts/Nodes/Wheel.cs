@@ -102,13 +102,14 @@ public class Wheel : VehicleNodeWithTorque {
         if (suspension.contacting) {
             var axleVelocity          = vehicle.Rigidbody.GetPointVelocity(transform.position);
             var longitudinalAxleSpeed = Vector3.Dot(axleVelocity, LongitudinalDirection);
+            var pacejkaBlend          = InverseLerp(0.1f, 0.2f, Abs(longitudinalAxleSpeed));
 
             // Longitudinal slip
             LongitudinalSlipRatio = Abs(AngularVelocity * radius / Max(Abs(longitudinalAxleSpeed), 1e-5f) - 1)
                 * Sign(AngularVelocity * radius - longitudinalAxleSpeed);
-            LongitudinalSlipRatio = Lerp(_slipLastTick, LongitudinalSlipRatio, 0.5f);
-            _slipLastTick         = LongitudinalSlipRatio;
-            // LongitudinalSlipRatio *= InverseLerp(0.1f, 1f, Abs(longitudinalAxleSpeed));
+            LongitudinalSlipRatio *= pacejkaBlend;
+            LongitudinalSlipRatio =  Lerp(_slipLastTick, LongitudinalSlipRatio, 0.5f);
+            _slipLastTick         =  LongitudinalSlipRatio;
 
             // Lateral slip
             var lateralAxleSpeed = Vector3.Dot(axleVelocity, transform.right);
@@ -116,6 +117,12 @@ public class Wheel : VehicleNodeWithTorque {
 
             // Calculate combined forces
             PacejkaCombined(LongitudinalSlipRatio, LateralSlipAngle);
+
+            // Blend from the simple model
+            var difference              = AngularVelocity * radius - longitudinalAxleSpeed;
+            var simpleLongitudinalForce = suspension.Force * difference * 0.5f;
+            LongitudinalForce = Lerp(simpleLongitudinalForce, LongitudinalForce, pacejkaBlend);
+
             LongitudinalForce = (_forceLastTick + LongitudinalForce) * 0.5f;
             _forceLastTick    = LongitudinalForce;
 
@@ -142,9 +149,8 @@ public class Wheel : VehicleNodeWithTorque {
 
         // Braking
         if (Abs(AngularVelocity) > 0 && brakeInput) {
-            var breakTorque        = brakeInput.ReadFloat() * brakeForce;
-            var appliedBrakeTorque = Sign(AngularVelocity) * Min(Abs(breakTorque), Abs(AngularMomentum / deltaTime));
-            AngularVelocity -= appliedBrakeTorque * deltaTime / UpstreamInertia;
+            var appliedBrakeChange = Min(Abs(brakeInput.ReadFloat() * brakeForce * deltaTime / UpstreamInertia), Abs(AngularVelocity)) * Sign(AngularVelocity);
+            AngularVelocity -= appliedBrakeChange;
         }
 
         // Update rotation and visual

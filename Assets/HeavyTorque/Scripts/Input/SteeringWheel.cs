@@ -20,7 +20,8 @@ public class SteeringWheel : VehicleInput {
     public                        string   vrAxis   = "Oculus_CrossPlatform_PrimaryThumbstick";
     public                        bool     supportsGamepad;
     public                        string   gamepadAxis;
-    [Tooltip("Degrees/s")] public float    turnSpeed = 100;
+    [Tooltip("Degrees/s")] public float    turnSpeed       = 100;
+    public                        float    turnSmoothSpeed = 5f;
 
     public float wheelRadius = 0.15f;
     public float grabDistanceThreshold;
@@ -33,6 +34,7 @@ public class SteeringWheel : VehicleInput {
     private float _input;
 
     private float _keyboardInput;
+    private float _smoothKeyboardInput;
     private float _gamepadInput;
     private float _vrJoystickInput;
     private float _vrInput;
@@ -48,6 +50,7 @@ public class SteeringWheel : VehicleInput {
 
         var targetAngle = ((Input.GetKey(leftKey) ? -1f : 0) + (Input.GetKey(rightKey) ? 1f : 0)) * maxRotation;
         _keyboardInput = MoveTowards(_keyboardInput, targetAngle, turnSpeed * Time.deltaTime);
+        _smoothKeyboardInput = Lerp(_smoothKeyboardInput, _keyboardInput, Time.deltaTime * turnSmoothSpeed);
 
         if (supportsGamepad) _gamepadInput = Input.GetAxisRaw(gamepadAxis) * maxRotation;
 
@@ -76,9 +79,10 @@ public class SteeringWheel : VehicleInput {
         }
 
         _vrInput                          = GetVRAngle();
-        _input                            = Clamp(_keyboardInput + _gamepadInput + _vrJoystickInput + _vrInput, -maxRotation, maxRotation);
-        steeringWheelVisual.localRotation = Quaternion.AngleAxis(_input, Vector3.forward);
+        _input                            = Clamp(_smoothKeyboardInput + _gamepadInput + _vrJoystickInput + _vrInput, -maxRotation, maxRotation);
         _input                            = _input / maxRotation * steering.maxSteeringAngle;
+        
+        steeringWheelVisual.localRotation = Quaternion.AngleAxis(steering.angle / steering.maxSteeringAngle * maxRotation, Vector3.forward);
     }
 
     private float GetVRAngle() {
