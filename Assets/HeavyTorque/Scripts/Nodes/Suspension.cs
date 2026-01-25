@@ -9,6 +9,7 @@ using UnityEditor;
 
 using static UnityEngine.Mathf;
 
+
 [ExecuteInEditMode, UdonBehaviourSyncMode(BehaviourSyncMode.None),]
 public class Suspension : VehicleNode {
 #if UNITY_EDITOR && !COMPILER_UDONSHARP
@@ -25,7 +26,8 @@ public class Suspension : VehicleNode {
 
     public float currentLength;
 
-    public float Force => stiffness * (restLength - currentLength);
+    public float Force    => stiffness * (restLength - currentLength);
+    public float MaxForce => stiffness * restLength;
 
     public RaycastHit HitInfo;
     public bool       contacting;
@@ -34,12 +36,16 @@ public class Suspension : VehicleNode {
 
     private void FixedUpdate() {
         contacting = Physics.Raycast(transform.position, -transform.up, out HitInfo, restLength + wheel.radius, groundLayer);
+
         if (contacting) {
-            var newLength    =  HitInfo.distance - wheel.radius;
-            var velocity     = (newLength - currentLength) / Time.fixedDeltaTime;
+            var newLength = HitInfo.distance - wheel.radius;
+            var velocity  = (newLength - currentLength) / Time.fixedDeltaTime;
             currentLength = newLength;
             var dampingForce = Max(0, velocity * damping);
-            wheel.vehicle.Rigidbody.AddForceAtPosition(transform.up * (Force - dampingForce), transform.position);
+            // TODO: There should be a threshold where it can start sliding down slopes again
+            var up           = transform.up;
+            up.x = up.z      = 0;
+            wheel.vehicle.Rigidbody.AddForceAtPosition(up * (Force - dampingForce), transform.position);
         }
         else {
             currentLength = restLength;

@@ -25,7 +25,7 @@ public class Engine : VehicleNodeWithTorque {
 
     public VehicleInput throttleInput;
 
-    public float Rpm    => output.GetUpstreamAngularVelocity() * 60 / (2 * PI);
+    public float Rpm    => output ? output.GetUpstreamAngularVelocity() * 60 / (2 * PI) : 0;
     public float Torque => SimpleThrottleModel(throttleInput.ReadFloat());
 
     public override void Tick(float deltaTime) {

@@ -10,7 +10,7 @@ using VRC.Udon.Common;
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class HandBrake : VehicleInput {
     public KeyCode toggleKey = KeyCode.Space;
-    public bool    _input;
+    private bool    _input;
 
     private void Update() {
         if (InVR || !InControl) return;

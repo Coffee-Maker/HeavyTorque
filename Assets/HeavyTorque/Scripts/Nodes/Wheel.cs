@@ -8,7 +8,6 @@ using System.Linq;
 using UdonSharp;
 
 using UnityEngine;
-using UnityEngine.Serialization;
 
 using static UnityEngine.Mathf;
 
@@ -18,11 +17,6 @@ using static UnityEngine.Mathf;
 /// </summary>
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class Wheel : VehicleNodeWithTorque {
-#if UNITY_EDITOR && !COMPILER_UDONSHARP
-    public static Texture2D WheelIcon => Resources.Load<Texture2D>("HeavyTorque/UI/Wheel");
-#endif
-    private bool _pinDebug;
-
     // Shape parameters of the Pacekja model
     private const float CShapeLongitudinal = 1.65f;
     private const float CShapeLateral      = 1.3f;
@@ -45,7 +39,9 @@ public class Wheel : VehicleNodeWithTorque {
     [Range(4,    12)]   public float bStiffness        = 8f;
     [Range(2,    12)]   public float bStiffnessLateral = 4f;
     [Range(0.1f, 1.9f)] public float dPeak             = 1f;
+    [Range(0.1f, 1.9f)] public float dPeakLateral      = 1f;
     [Range(-10,  1)]    public float eCurvature        = 0.97f;
+    [Range(-10,  1)]    public float eCurvatureLateral = -4f;
 
     [Header("Aligning Torque")]
     [Range(0,   12)] public float bAligning = 2;
@@ -61,7 +57,8 @@ public class Wheel : VehicleNodeWithTorque {
     // Info
     public float        AngularMomentum => AngularVelocity * UpstreamInertia; // kg·m²/s
     public float        AngularVelocity { get; private set; }                 // radians/s
-    public float        GroundSpeed     => AngularVelocity * radius;          // m/s
+    public float        Rpm             => AngularVelocity * 60 / (2 * PI);
+    public float        GroundSpeed     => AngularVelocity * radius; // m/s
     public float        angle;
     public float        rotation;
     public VehicleInput brakeInput;
@@ -70,19 +67,23 @@ public class Wheel : VehicleNodeWithTorque {
     public Vector3 LateralDirection      => transform.right;
 
     // Computed properties
-    public  float      SpinInertia     => 0.5f * mass * radius * radius; // kg·m²
-    public  Quaternion WheelRotation   => transform.rotation * Quaternion.AngleAxis(rotation * Rad2Deg, Vector3.right);
-    
-    private float      UpstreamInertia => GetInertia(InertiaFrom.Input, InertiaDirection.Upstream);
+    public float      SpinInertia   => 0.5f * mass * radius * radius; // kg·m²
+    public Quaternion WheelRotation => transform.rotation * Quaternion.AngleAxis(rotation * Rad2Deg, Vector3.right);
+
+    private float UpstreamInertia => GetInertia(InertiaFrom.Input, InertiaDirection.Upstream);
 
     private float _appliedTorque;
     private float _appliedTorqueLastTick;
+    private float _forceLastTick;
+    private float _slipLastTick;
 
     // Debug data
-    private float _longitudinalSlipRatio;
-    private float _longitudinalForce;
-    private float _lateralSlipAngle;
-    private float _lateralForce;
+    public float LongitudinalSlipRatio { get; private set; }
+    public float LongitudinalForce     { get; private set; }
+    public float LateralSlipAngle      { get; private set; }
+    public float LateralForce          { get; private set; }
+
+    public float FrictionLimit => Max(0, suspension.Force);
 
     private void OnValidate() {
         if (vehicle == null) vehicle = GetComponentInParent<Vehicle>();
@@ -99,55 +100,35 @@ public class Wheel : VehicleNodeWithTorque {
         _appliedTorque         =  0;
 
         if (suspension.contacting) {
-            var axleVelocity = vehicle.Rigidbody.GetPointVelocity(transform.position);
-
-            // var hitInfo      = suspension.HitInfo;
-            // var cylindricalPoint = Vector3.ProjectOnPlane(hitInfo.point - transform.position, transform.right) + transform.position;
-            // LongitudinalDirection = Vector3.Cross(contactOffset, transform.right).normalized;
-
+            var axleVelocity          = vehicle.Rigidbody.GetPointVelocity(transform.position);
             var longitudinalAxleSpeed = Vector3.Dot(axleVelocity, LongitudinalDirection);
 
             // Longitudinal slip
-            var centripetalVelocity = AngularVelocity * radius;
-            var tireRoadDifference  = centripetalVelocity - longitudinalAxleSpeed;
-            _longitudinalSlipRatio = Approximately(0, longitudinalAxleSpeed) ? 1e-5f : tireRoadDifference / Abs(longitudinalAxleSpeed);
+            LongitudinalSlipRatio = Abs(AngularVelocity * radius / Max(Abs(longitudinalAxleSpeed), 1e-5f) - 1)
+                * Sign(AngularVelocity * radius - longitudinalAxleSpeed);
+            LongitudinalSlipRatio = Lerp(_slipLastTick, LongitudinalSlipRatio, 0.5f);
+            _slipLastTick         = LongitudinalSlipRatio;
+            // LongitudinalSlipRatio *= InverseLerp(0.1f, 1f, Abs(longitudinalAxleSpeed));
 
             // Lateral slip
             var lateralAxleSpeed = Vector3.Dot(axleVelocity, transform.right);
-            _lateralSlipAngle = Vector2.SignedAngle(Vector2.up, new Vector2(lateralAxleSpeed, longitudinalAxleSpeed).normalized) * Deg2Rad;
+            LateralSlipAngle = Vector2.SignedAngle(Vector2.up, new Vector2(lateralAxleSpeed, longitudinalAxleSpeed).normalized) * Deg2Rad;
 
             // Calculate combined forces
-            PacejkaCombined(Max(0, suspension.Force), _longitudinalSlipRatio, _lateralSlipAngle, out _longitudinalForce, out _lateralForce);
-            _lateralForce *= Clamp01(Abs(lateralAxleSpeed) * 2);
-
-            // Blend to simple models when at low speeds as the Pacejka model does not handle static friction
-            var simpleLateralFriction = Vector3.Dot(Vector3.ProjectOnPlane(suspension.Force * suspension.transform.up, Vector3.up), LateralDirection);
-            simpleLateralFriction =  Clamp(Abs(simpleLateralFriction), 0, dPeak * suspension.Force) * -Sign(simpleLateralFriction);
-            _lateralForce         += simpleLateralFriction * (1 - Clamp01(Abs(lateralAxleSpeed * 2)));
-
-            var simpleLongitudinalFriction = Vector3.Dot(Vector3.ProjectOnPlane(suspension.Force * suspension.transform.up, Vector3.up), LongitudinalDirection);
-            simpleLongitudinalFriction = Clamp(Abs(simpleLongitudinalFriction), 0, dPeak * suspension.Force) * -Sign(simpleLongitudinalFriction);
-            var simpleLongitudinalFrictionBlend = 1 - Clamp01(Abs(tireRoadDifference) * 0.2f);
-            simpleLongitudinalFriction += tireRoadDifference * suspension.Force * 0.2f;
-            _longitudinalForce         *= 1 - simpleLongitudinalFrictionBlend;
-
-            vehicle.Rigidbody.AddForceAtPosition(
-                simpleLongitudinalFriction * simpleLongitudinalFrictionBlend * LongitudinalDirection * deltaTime,
-                transform.position,
-                ForceMode.Impulse
-            );
-
-            AngularVelocity -= tireRoadDifference
-                / radius
-                * deltaTime
-                * simpleLongitudinalFrictionBlend;
+            PacejkaCombined(LongitudinalSlipRatio, LateralSlipAngle);
+            LongitudinalForce = (_forceLastTick + LongitudinalForce) * 0.5f;
+            _forceLastTick    = LongitudinalForce;
 
             // Apply forces to the vehicle
-            vehicle.Rigidbody.AddForceAtPosition(LongitudinalDirection * (_longitudinalForce * deltaTime), transform.position, ForceMode.Impulse);
-            AngularVelocity -= _longitudinalForce * radius * deltaTime / UpstreamInertia; // Apply an opposing torque to the wheel
+            vehicle.Rigidbody.AddForceAtPosition(LongitudinalDirection * (LongitudinalForce * deltaTime), transform.position, ForceMode.Impulse);
 
-            // TODO: Varify that this force should be applied in this direction
-            vehicle.Rigidbody.AddForceAtPosition(transform.right * (_lateralForce * deltaTime), transform.position, ForceMode.Impulse);
+            LateralForce *= Clamp01(Abs(lateralAxleSpeed) * 2);
+            vehicle.Rigidbody.AddForceAtPosition(transform.right * (LateralForce * deltaTime), transform.position, ForceMode.Impulse);
+
+            // Recalculate slip after applying forces so we can clamp the wheel torque properly
+            var tireRoadDifference = AngularVelocity * radius - longitudinalAxleSpeed;
+            var maxChange          = Abs(tireRoadDifference / radius);
+            AngularVelocity -= Clamp(LongitudinalForce * radius * deltaTime / UpstreamInertia, -maxChange, maxChange); // Apply an opposing torque to the wheel
 
             // Aligning torque
             var bSlipSpeed     = bAligning * lateralAxleSpeed;
@@ -194,7 +175,6 @@ public class Wheel : VehicleNodeWithTorque {
 
     public override float GetUpstreamAngularVelocity() => AngularVelocity;
 
-
     /// <summary>
     /// Provides the longitudinal and lateral friction forces using the Pacejka "Magic Formula" tire model.
     /// </summary>
@@ -205,61 +185,34 @@ public class Wheel : VehicleNodeWithTorque {
     /// <param name="lateralModel">A value from 0 to 1 where 0 is a simplified and stable model and 1 is Pacejkas magic formula</param>
     /// <param name="longitudinalForce">A force in kN/s that should be applied </param>
     /// <param name="lateralForce">kN/s</param>
-    private void PacejkaCombined(float verticalForce, float slipRatio, float slipAngle, out float longitudinalForce, out float lateralForce) {
-        if (verticalForce <= 0f) {
-            longitudinalForce = 0f;
-            lateralForce      = 0f;
+    private void PacejkaCombined(float slipRatio, float slipAngle) {
+        var frictionLimit = FrictionLimit;
+
+        if (frictionLimit <= 0f) {
+            LongitudinalForce = 0f;
+            LateralForce      = 0f;
             return;
         }
 
         var bSlipRatio = bStiffness * slipRatio;
-        longitudinalForce = Sin(CShapeLongitudinal * Atan(bSlipRatio - eCurvature * (bSlipRatio - Atan(bSlipRatio))));
+        LongitudinalForce = dPeak * Sin(CShapeLongitudinal * Atan(bSlipRatio - eCurvature * (bSlipRatio - Atan(bSlipRatio))));
 
         var bSlipAngle = bStiffnessLateral * slipAngle;
-        lateralForce = Sin(CShapeLateral * Atan(bSlipAngle - eCurvature * (bSlipAngle - Atan(bSlipAngle))));
+        LateralForce = dPeakLateral * Sin(CShapeLateral * Atan(bSlipAngle - eCurvatureLateral * (bSlipAngle - Atan(bSlipAngle))));
 
-        var length = Sqrt(longitudinalForce * longitudinalForce + lateralForce * lateralForce);
+        var length = Sqrt(LongitudinalForce * LongitudinalForce + LateralForce * LateralForce);
 
         if (length > 1) {
-            longitudinalForce /= length;
-            lateralForce      /= length;
+            LongitudinalForce /= length;
+            LateralForce      /= length;
         }
 
-        var frictionLimit = verticalForce * dPeak;
-        longitudinalForce *= frictionLimit;
-        lateralForce      *= frictionLimit;
+        LongitudinalForce *= frictionLimit;
+        LateralForce      *= frictionLimit;
     }
 
 #if UNITY_EDITOR && !COMPILER_UDONSHARP
-    // Debug visuals
-    private void OnDrawGizmos() {
-        if (Selection.gameObjects.Contains(gameObject)) return;
-
-        var hovered = Vehicle.DrawHandleContent(transform.position,
-            WheelIcon,
-            Color.red,
-            new GUIContent($"ω {AngularVelocity:F1} rad/s\n v {GroundSpeed:F1} m/s\n Torque {_appliedTorqueLastTick:F2}"),
-            ref _pinDebug
-        );
-
-        // State
-        if (hovered || _pinDebug) ShowAdditionalGizmos();
-    }
-
     private void OnDrawGizmosSelected() {
-        var forcePinDebug = true;
-
-        Vehicle.DrawHandleContent(transform.position,
-            WheelIcon,
-            Color.red,
-            new GUIContent($"ω {AngularVelocity:F1} rad/s\n v {GroundSpeed:F1} m/s\n Torque {_appliedTorqueLastTick:F2}"),
-            ref forcePinDebug
-        );
-
-        ShowAdditionalGizmos();
-    }
-
-    private void ShowAdditionalGizmos() {
         Handles.color = Color.red;
         Handles.DrawWireDisc(transform.position, transform.right, radius, 2f);
         Handles.DrawLine(transform.position, transform.position + WheelRotation * Vector3.forward * radius, 2f);
@@ -267,13 +220,13 @@ public class Wheel : VehicleNodeWithTorque {
         // Forces
         if (suspension && suspension.contacting) {
             Handles.color = Color.green;
-            Handles.DrawWireArc(transform.position, transform.up, transform.forward, _lateralSlipAngle * Rad2Deg, radius, 2f);
-            Handles.DrawLine(transform.position, transform.position + transform.right * _lateralForce / suspension.Force, 5f);
+            Handles.DrawWireArc(transform.position, transform.up, transform.forward, LateralSlipAngle * Rad2Deg, radius, 2f);
+            Handles.DrawLine(transform.position, transform.position + transform.right * LateralForce / suspension.Force, 5f);
 
             Handles.color = Color.blue;
-            Handles.DrawLine(transform.position, transform.position + LongitudinalDirection * _longitudinalSlipRatio, 5f);
+            Handles.DrawLine(transform.position, transform.position + LongitudinalDirection * LongitudinalSlipRatio, 5f);
             Handles.color = Color.cyan;
-            Handles.DrawLine(transform.position, transform.position + LongitudinalDirection * _longitudinalForce / suspension.Force, 2f);
+            Handles.DrawLine(transform.position, transform.position + LongitudinalDirection * LongitudinalForce / suspension.Force, 2f);
         }
     }
 #endif

@@ -20,12 +20,18 @@ public class VehicleStation : UdonSharpBehaviour {
         if (vehicle) Networking.SetOwner(player, vehicle.gameObject);
         owner = player.playerId;
         foreach (var input in inputs) input.TakeControl(this);
-        foreach (var obj in enableOnEnter) obj.SetActive(true);
+
+        if (player.isLocal)
+            foreach (var obj in enableOnEnter)
+                obj.SetActive(true);
     }
 
     public override void OnStationExited(VRCPlayerApi player) {
         owner = -1;
         foreach (var input in inputs) input.RevokeControl();
-        foreach (var obj in enableOnEnter) obj.SetActive(false);
+
+        if (player.isLocal)
+            foreach (var obj in enableOnEnter)
+                obj.SetActive(false);
     }
 }

@@ -13,21 +13,30 @@ public class GearStick : VehicleInput {
     public Pedal        clutchPedal;
     public Pedal        throttlePedal;
 
-    public HandType handType;
     public float    activationThreshold   = 0.5f;
     public float    deactivationThreshold = 0.3f;
     public float    clutchEngagementTime  = 0.2f;
 
-    public KeyCode shiftUpKey   = KeyCode.E;
-    public KeyCode shiftDownKey = KeyCode.Q;
+    public KeyCode shiftUpKey            = KeyCode.E;
+    public KeyCode shiftDownKey          = KeyCode.Q;
+    public KeyCode secondaryShiftUpKey   = KeyCode.Joystick1Button2;
+    public KeyCode secondaryShiftDownKey = KeyCode.Joystick1Button1;
+    public string  vrAxis                = "Oculus_CrossPlatform_PrimaryThumbstickVertical";
 
     private bool  _shiftReady;
     private float _clutchEngagement;
 
     private void Update() {
-        if (!InControl || InVR) return;
+        if (!InControl) return;
+        
+        var vrInput      = Input.GetAxisRaw(vrAxis);
+        var activating   = Abs(vrInput) > activationThreshold;
+        var deactivating = Abs(vrInput) < deactivationThreshold;
+        var vrShiftUp = _shiftReady && activating && vrInput > 0;
+        var vrShiftDown = _shiftReady && activating && vrInput < 0;
+        _shiftReady = (_shiftReady || deactivating) && !activating;
 
-        if (Input.GetKeyDown(shiftUpKey)) {
+        if (Input.GetKeyDown(shiftUpKey) || Input.GetKeyDown(secondaryShiftUpKey) || vrShiftUp) {
             if (clutchPedal) clutchPedal.automatedBlend   = 1;
             _clutchEngagement            = 0;
             if (throttlePedal) throttlePedal.automatedBlend = 1;
@@ -35,14 +44,14 @@ public class GearStick : VehicleInput {
             transmission.SetGear(transmission.currentGear + 1);
         }
 
-        if (Input.GetKeyDown(shiftDownKey)) {
+        if (Input.GetKeyDown(shiftDownKey) || Input.GetKeyDown(secondaryShiftDownKey) || vrShiftDown) {
             if (clutchPedal) clutchPedal.automatedBlend   = 1;
             _clutchEngagement            = 0;
             if (throttlePedal) throttlePedal.automatedBlend = 1;
             if (throttlePedal) throttlePedal.automatedInput = 0;
             transmission.SetGear(transmission.currentGear - 1);
         }
-
+        
         _clutchEngagement = Min(1, _clutchEngagement + Time.deltaTime / clutchEngagementTime);
         if (clutchPedal) clutchPedal.automatedInput = 1 - _clutchEngagement;
 
@@ -55,12 +64,4 @@ public class GearStick : VehicleInput {
     public override float ReadFloat() => transmission.currentGear;
 
     public override int ReadInt() => transmission.currentGear;
-
-    public override void InputMoveVertical(float value, UdonInputEventArgs args) {
-        if (!InControl || !InVR || args.handType != handType) return;
-        var activating   = Abs(value) > activationThreshold;
-        var deactivating = Abs(value) < deactivationThreshold;
-        if (_shiftReady && activating) transmission.SetGear(transmission.currentGear + (int)Sign(args.floatValue));
-        _shiftReady = (_shiftReady || deactivating) && !activating;
-    }
 }
