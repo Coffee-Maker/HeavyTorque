@@ -26,26 +26,26 @@ public class Suspension : VehicleNode {
 
     public float currentLength;
 
-    public float Force    => stiffness * (restLength - currentLength);
     public float MaxForce => stiffness * restLength;
 
     public RaycastHit HitInfo;
     public bool       contacting;
 
+    [HideInInspector] public Vector3 lastForce;
+
     private void Awake() { currentLength = restLength; }
 
-    private void FixedUpdate() {
+    public override void Tick(float deltaTime) {
         contacting = Physics.Raycast(transform.position, -transform.up, out HitInfo, restLength + wheel.radius, groundLayer);
 
         if (contacting) {
             var newLength = HitInfo.distance - wheel.radius;
-            var velocity  = (newLength - currentLength) / Time.fixedDeltaTime;
+            var velocity  = (newLength - currentLength) / deltaTime;
             currentLength = newLength;
             var dampingForce = Max(0, velocity * damping);
-            // TODO: There should be a threshold where it can start sliding down slopes again
-            var up           = transform.up;
-            up.x = up.z      = 0;
-            wheel.vehicle.Rigidbody.AddForceAtPosition(up * (Force - dampingForce), transform.position);
+            var force        = stiffness * (restLength - currentLength);
+            lastForce = transform.up * (force - dampingForce);
+            wheel.vehicle.Rigidbody.AddForceAtPosition(lastForce, transform.position);
         }
         else {
             currentLength = restLength;
@@ -66,7 +66,7 @@ public class Suspension : VehicleNode {
         var hovering = Vehicle.DrawHandleContent(transform.position,
             SuspensionIcon,
             Color.red,
-            new GUIContent($"{(currentLength / restLength - 1) * 100:0}%\nF {Force:0} N"),
+            new GUIContent($"{(currentLength / restLength - 1) * 100:0}%\nF {lastForce.magnitude:0} N"),
             ref _pinDebug
         );
 

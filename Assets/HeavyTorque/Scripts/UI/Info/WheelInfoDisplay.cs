@@ -29,7 +29,7 @@ public class WheelInfoDisplay : NodeInfoComponent {
         if (speedLabel) speedLabel.text                         = $"{Wheel.AngularVelocity * Wheel.radius * 3.6f:N0}km/h";
         if (longitudinalSlipBar) longitudinalSlipBar.localScale = new Vector3(Wheel.LongitudinalSlipRatio,                        1, 1);
         if (lateralSlipBar) lateralSlipBar.localScale           = new Vector3(Abs(Wheel.LateralSlipAngle) / PI,                   1, 1);
-        if (loadBar) loadBar.localScale                         = new Vector3(Wheel.suspension.Force / Wheel.suspension.MaxForce, 1, 1);
+        if (loadBar) loadBar.localScale                         = new Vector3(Wheel.suspension.lastForce.magnitude / Wheel.suspension.MaxForce, 1, 1);
 
         if (wheelRotationRect) wheelRotationRect.localRotation = Quaternion.AngleAxis(-Wheel.angle, Vector3.forward);
 
