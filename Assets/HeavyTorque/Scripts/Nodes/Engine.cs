@@ -58,15 +58,4 @@ public class Engine : VehicleNodeWithTorque {
     public override float GetDownstreamAngularVelocity() => output ? output.GetDownstreamAngularVelocity() : 0;
 
     public override float GetUpstreamAngularVelocity() => GetDownstreamAngularVelocity();
-
-#if UNITY_EDITOR && !COMPILER_UDONSHARP
-    private void OnDrawGizmos() {
-        Vehicle.DrawHandleContent(transform.position,
-            EngineIcon,
-            Color.red,
-            new GUIContent($"RPM: {Rpm:0}\nTorque: {fullThrottle.Evaluate(Rpm):0} Nm"),
-            ref _pinDebug
-        );
-    }
-#endif
 }

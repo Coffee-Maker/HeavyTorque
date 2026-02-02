@@ -10,9 +10,10 @@ using static UnityEngine.Mathf;
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class WheelInfoDisplay : NodeInfoComponent {
     public Wheel           Wheel => (Wheel)node;
-    public TextMeshProUGUI radiusLabel, massLabel, rpmLabel, speedLabel;
+    public TextMeshProUGUI radiusLabel, massLabel, rpmLabel, speedLabel, longitudinalSlipLabel, lateralSlipLabel;
     public RectTransform longitudinalSlipBar,
         lateralSlipBar,
+        brakeBar,
         loadBar,
         wheelRotationRect,
         longitudinalFrictionArrow,
@@ -27,8 +28,11 @@ public class WheelInfoDisplay : NodeInfoComponent {
     private void FixedUpdate() {
         if (rpmLabel) rpmLabel.text                             = $"{Wheel.Rpm:N0}rpm";
         if (speedLabel) speedLabel.text                         = $"{Wheel.AngularVelocity * Wheel.radius * 3.6f:N0}km/h";
+        if (longitudinalSlipLabel) longitudinalSlipLabel.text   = $"{Wheel.LongitudinalSlipRatio:P1}";
+        if (lateralSlipLabel) lateralSlipLabel.text             = $"{Wheel.LateralSlipAngle * Rad2Deg:F1}°";
         if (longitudinalSlipBar) longitudinalSlipBar.localScale = new Vector3(Wheel.LongitudinalSlipRatio,                        1, 1);
         if (lateralSlipBar) lateralSlipBar.localScale           = new Vector3(Abs(Wheel.LateralSlipAngle) / PI,                   1, 1);
+        if (brakeBar) brakeBar.localScale                       = new Vector3(Wheel.brakeInput.ReadFloat(),                      1, 1);
         if (loadBar) loadBar.localScale                         = new Vector3(Wheel.suspension.lastForce.magnitude / Wheel.suspension.MaxForce, 1, 1);
 
         if (wheelRotationRect) wheelRotationRect.localRotation = Quaternion.AngleAxis(-Wheel.angle, Vector3.forward);
@@ -53,7 +57,7 @@ public class WheelInfoDisplay : NodeInfoComponent {
                 lateralFrictionArrow.gameObject.SetActive(true);
                 var length = Wheel.LateralForce / Wheel.FrictionLimit * 100f;
                 lateralFrictionArrow.sizeDelta     = new Vector2(lateralFrictionArrow.sizeDelta.x, Abs(length));
-                lateralFrictionArrow.localRotation = Quaternion.AngleAxis(length < 0 ? -90f : 90f, Vector3.forward);
+                lateralFrictionArrow.localRotation = Quaternion.AngleAxis(length < 0 ? 90f : -90f, Vector3.forward);
             }
         }
 
@@ -67,7 +71,7 @@ public class WheelInfoDisplay : NodeInfoComponent {
                 combinedFrictionArrow.sizeDelta = new Vector2(combinedFrictionArrow.sizeDelta.x, combinedForce / Wheel.FrictionLimit * 100f);
 
                 combinedFrictionArrow.localRotation = Quaternion.AngleAxis(
-                    Atan2(Wheel.LateralForce, Wheel.LongitudinalForce) * Rad2Deg,
+                    Atan2(-Wheel.LateralForce, Wheel.LongitudinalForce) * Rad2Deg,
                     Vector3.forward
                 );
             }

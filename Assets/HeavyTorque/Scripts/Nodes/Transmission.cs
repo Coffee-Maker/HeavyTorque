@@ -115,15 +115,4 @@ public class Transmission : VehicleNodeWithTorque {
         if (currentGear == NeutralGearIndex) return AngularVelocity;
         return GetDownstreamAngularVelocity() * GearRatio;
     }
-
-#if UNITY_EDITOR && !COMPILER_UDONSHARP
-    private void OnDrawGizmos() {
-        Vehicle.DrawHandleContent(transform.position,
-            TransmissionIcon,
-            Color.red,
-            new GUIContent($"{(currentGear == 0 ? "R" : currentGear == 1 ? "N" : (currentGear - 1).ToString())} ({GearRatio:0.00})"),
-            ref _pinDebug
-        );
-    }
-#endif
 }

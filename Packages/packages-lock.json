@@ -1,5 +1,14 @@
 {
   "dependencies": {
+    "com.s-ilent.customtonemap": {
+      "version": "https://github.com/s-ilent/custom-tonemap.git",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.postprocessing": "3.2.2"
+      },
+      "hash": "212a8e0814023ccaa9778cb629fd64f5cf3c15b9"
+    },
     "com.unity.2d.sprite": {
       "version": "1.0.0",
       "depth": 0,

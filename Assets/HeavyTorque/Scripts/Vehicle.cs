@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 
 using UdonSharp;
@@ -38,14 +39,26 @@ public class Vehicle : UdonSharpBehaviour {
     public float steeringTime;
     public int   frames;
 
+    public Vector3 size = new Vector3(2f, 1f, 4f);
+
+    private float _timescale = 1;
+
     private void Start() {
         _vehicleNodes = GetComponentsInChildren<VehicleNode>();
 
         foreach (var node in _vehicleNodes)
             node.vehicle = this;
 
-        Rigidbody.drag        = 0;
-        Rigidbody.angularDrag = 0;
+        Rigidbody.drag                   = 0;
+        Rigidbody.angularDrag            = 0;
+        Rigidbody.useGravity             = false;
+        Rigidbody.automaticInertiaTensor = false;
+
+        Rigidbody.inertiaTensor = new Vector3(
+            Rigidbody.mass * (size.y * size.y + size.x * size.x) / 12f,
+            Rigidbody.mass * (size.x * size.x + size.z * size.z) / 12f,
+            Rigidbody.mass * (size.x * size.x + size.y * size.y) / 12f
+        );
     }
 
     private void FixedUpdate() {
@@ -54,13 +67,23 @@ public class Vehicle : UdonSharpBehaviour {
             doImpulse = false;
         }
 
-        var dt = Time.fixedDeltaTime / substeps;
+        var velocity        = Rigidbody.velocity.magnitude / _timescale;
+        var angularVelocity = Rigidbody.angularVelocity.magnitude / _timescale;
+        var newTimescale    = Input.GetKey(KeyCode.LeftControl) ? 0.1f : 1f;
+        _timescale                = Mathf.Lerp(_timescale, newTimescale, Time.fixedDeltaTime * 5f);
+        Rigidbody.velocity        = Rigidbody.velocity.normalized * (velocity * _timescale);
+        Rigidbody.angularVelocity = Rigidbody.angularVelocity.normalized * (angularVelocity * _timescale);
+
+        Rigidbody.AddForce(Physics.gravity * _timescale, ForceMode.Acceleration);
+
+        var dt = Time.fixedDeltaTime / substeps * _timescale;
 
         var stopwatch = Stopwatch.StartNew();
 
         for (var i = 0; i < substeps; i++)
-            foreach (var node in _vehicleNodes)
+            foreach (var node in _vehicleNodes) {
                 node.Tick(dt);
+            }
 
         stopwatch.Stop();
         totalTime += (float)stopwatch.Elapsed.TotalMilliseconds;
@@ -68,64 +91,14 @@ public class Vehicle : UdonSharpBehaviour {
     }
 
 #if UNITY_EDITOR && !COMPILER_UDONSHARP
-    private void OnDrawGizmos() {
-        DrawHandleContent(transform.position, VehicleIcon, Color.red, new GUIContent($"V {Rigidbody.velocity.magnitude * 3.6f:0} km/h"), ref _pinDebug);
-    }
+    private void OnDrawGizmosSelected() {
+        Handles.matrix = transform.localToWorldMatrix;
+        Handles.color  = Color.yellow;
+        Handles.DrawLine(Rigidbody.centerOfMass, Rigidbody.centerOfMass + Vector3.up, 0.2f);
+        Handles.DrawWireDisc(Rigidbody.centerOfMass, Vector3.up, 0.2f);
 
-    /// <summary>
-    /// Draws a handle with an icon at the given position. When hovered or pinned, it shows additional content.
-    /// </summary>
-    /// <param name="position"></param>
-    /// <param name="icon"></param>
-    /// <param name="color"></param>
-    /// <param name="hoverContent"></param>
-    /// <param name="pinDebug"></param>
-    /// <returns>True if the element is being hovered</returns>
-    public static bool DrawHandleContent(Vector3 position, Texture2D icon, Color color, GUIContent hoverContent, ref bool pinDebug) {
-        var hoverStyle = new GUIStyle {
-            alignment     = TextAnchor.MiddleLeft,
-            fontSize      = 10,
-            fontStyle     = pinDebug ? FontStyle.Bold : FontStyle.Normal,
-            imagePosition = ImagePosition.ImageLeft,
-            normal        = { textColor = Color.white, },
-        };
-
-        var size      = pinDebug ? hoverStyle.CalcSize(hoverContent) : Vector2.one * 30;
-        var screenPos = HandleUtility.WorldToGUIPoint(position);
-        var rect      = new Rect(screenPos.x - size.x / 2, screenPos.y - size.y / 2, size.x, size.y);
-
-        bool hovering;
-
-        if (SceneView.currentDrawingSceneView) {
-            var screenRect = SceneView.currentDrawingSceneView.position;
-            var mousePos   = GUIUtility.GUIToScreenPoint(Event.current.mousePosition) - new Vector2(screenRect.x, screenRect.y);
-            hovering = rect.Contains(mousePos);
-        }
-        else {
-            var mousePos = Event.current.mousePosition;
-            mousePos -= new Vector2(0, 40); // Adjust for game view title bar
-            hovering =  rect.Contains(mousePos);
-        }
-
-        Handles.BeginGUI();
-        Handles.color = Color.white;
-        GUI.color     = Color.white;
-
-        if (Input.GetKey(KeyCode.LeftShift) && Input.GetMouseButton(0) && hovering) pinDebug = false;
-        else if (Input.GetMouseButton(0) && hovering) pinDebug                               = true;
-
-        if (!hovering && !pinDebug) {
-            GUI.Label(rect, icon);
-        }
-        else {
-            if (!pinDebug) rect.x += size.x / 2 + 5;
-            rect.y    -= size.y / 2;
-            GUI.color =  color;
-            GUI.Label(rect, hoverContent, hoverStyle);
-        }
-
-        Handles.EndGUI();
-        return hovering;
+        Handles.color = Color.cyan;
+        Handles.DrawWireCube(Vector3.zero, size);
     }
 #endif
 }

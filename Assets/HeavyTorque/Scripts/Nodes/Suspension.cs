@@ -1,11 +1,10 @@
-using System.Linq;
+#if UNITY_EDITOR && !COMPILER_UDONSHARP
+using UnityEditor;
+#endif
 
 using UdonSharp;
 
 using UnityEngine;
-#if UNITY_EDITOR && !COMPILER_UDONSHARP
-using UnityEditor;
-#endif
 
 using static UnityEngine.Mathf;
 
@@ -39,13 +38,13 @@ public class Suspension : VehicleNode {
         contacting = Physics.Raycast(transform.position, -transform.up, out HitInfo, restLength + wheel.radius, groundLayer);
 
         if (contacting) {
-            var newLength = HitInfo.distance - wheel.radius;
+            var newLength = Max(0, HitInfo.distance - wheel.radius);
             var velocity  = (newLength - currentLength) / deltaTime;
             currentLength = newLength;
             var dampingForce = Max(0, velocity * damping);
-            var force        = stiffness * (restLength - currentLength);
-            lastForce = transform.up * (force - dampingForce);
-            wheel.vehicle.Rigidbody.AddForceAtPosition(lastForce, transform.position);
+            var force        = Max(0, stiffness * (restLength - currentLength) - dampingForce);
+            lastForce = HitInfo.normal * (force * Vector3.Dot(HitInfo.normal, transform.up));
+            vehicle.Rigidbody.AddForceAtPosition(lastForce * deltaTime, HitInfo.point, ForceMode.Impulse);
         }
         else {
             currentLength = restLength;
@@ -60,22 +59,7 @@ public class Suspension : VehicleNode {
     }
 
 #if UNITY_EDITOR && !COMPILER_UDONSHARP
-    private void OnDrawGizmos() {
-        if (Selection.gameObjects.Contains(gameObject)) return;
-
-        var hovering = Vehicle.DrawHandleContent(transform.position,
-            SuspensionIcon,
-            Color.red,
-            new GUIContent($"{(currentLength / restLength - 1) * 100:0}%\nF {lastForce.magnitude:0} N"),
-            ref _pinDebug
-        );
-
-        if (hovering || _pinDebug) DrawAdditionalGizmos();
-    }
-
-    private void OnDrawGizmosSelected() { DrawAdditionalGizmos(); }
-
-    private void DrawAdditionalGizmos() {
+    private void OnDrawGizmosSelected() {
         Handles.color = Color.grey;
         Handles.DrawLine(transform.position, transform.position - transform.up * restLength, 3);
 

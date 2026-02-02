@@ -2,8 +2,8 @@
 using UnityEditor;
 #endif
 
+using System;
 using System.Diagnostics;
-using System.Linq;
 
 using UdonSharp;
 
@@ -30,17 +30,19 @@ public class Wheel : VehicleNodeWithTorque {
 
     [Header("Properties")]
     [Tooltip("Radius from axle to contact point in meters")]
-    public float radius = 0.5f;             // m
-    public float mass              = 20f;   // kg
-    public float turnInertia       = 1f;    // kg·m²
-    public float axleFrictionForce = 1f;    // Nm/s
-    public float brakeForce        = 1500f; // Nm
+    public float radius = 0.5f;                              // m
+    public                float mass                = 20f;   // kg
+    public                float turnInertia         = 1f;    // kg·m²
+    public                float axleFrictionForce   = 1f;    // Nm/s
+    public                float brakeForce          = 1500f; // Nm
+    [Range(1, 10)] public float frictionCoefficient = 1f;
 
-    [Range(4,    12)]   public float bStiffness        = 8f;
+    [Range(4,    12)]   public float bStiffness = 8f;
+    [Range(0.1f, 1.9f)] public float dPeak      = 1f;
+    [Range(-10,  1)]    public float eCurvature = 0.97f;
+
     [Range(2,    12)]   public float bStiffnessLateral = 4f;
-    [Range(0.1f, 1.9f)] public float dPeak             = 1f;
     [Range(0.1f, 1.9f)] public float dPeakLateral      = 1f;
-    [Range(-10,  1)]    public float eCurvature        = 0.97f;
     [Range(-10,  1)]    public float eCurvatureLateral = -4f;
 
     [Header("Aligning Torque")]
@@ -48,7 +50,6 @@ public class Wheel : VehicleNodeWithTorque {
     [Range(2,   12)]   public float cAligning = 2.2f;
     [Range(.1f, 1.9f)] public float dAligning = .4f;
     [Range(-10, 1)]    public float eAligning = -7;
-
 
     // Info
     public float        AngularMomentum => AngularVelocity * UpstreamInertia; // kg·m²/s
@@ -59,12 +60,11 @@ public class Wheel : VehicleNodeWithTorque {
     public float        rotation;
     public VehicleInput brakeInput;
 
-    public Vector3 LongitudinalDirection => transform.forward;
+    public Vector3 LongitudinalDirection => Vector3.Cross(suspension.HitInfo.point - transform.position, transform.right).normalized;
     public Vector3 LateralDirection      => transform.right;
 
     // Computed properties
-    public float      SpinInertia   => 0.5f * mass * radius * radius; // kg·m²
-    public Quaternion WheelRotation => transform.rotation * Quaternion.AngleAxis(rotation * Rad2Deg, Vector3.right);
+    public float SpinInertia => 0.5f * mass * radius * radius; // kg·m²
 
     private float UpstreamInertia => GetInertia(InertiaFrom.Input, InertiaDirection.Upstream);
 
@@ -76,7 +76,10 @@ public class Wheel : VehicleNodeWithTorque {
     public float LateralSlipAngle      { get; private set; }
     public float LateralForce          { get; private set; }
 
-    public float FrictionLimit => Max(0, suspension.lastForce.magnitude);
+    public float FrictionLimit => Max(0, suspension.lastForce.magnitude * frictionCoefficient);
+
+    private float _lastRotation;
+    private float _rotationUpdateTime;
 
     private void OnValidate() {
         if (vehicle == null) vehicle = GetComponentInParent<Vehicle>();
@@ -85,9 +88,13 @@ public class Wheel : VehicleNodeWithTorque {
     public override void Tick(float deltaTime) {
         var stopwatch = Stopwatch.StartNew();
 
-        transform.localRotation = Quaternion.AngleAxis(angle, transform.up);
+        // Wheel torque
+        AngularVelocity         += _appliedTorque / UpstreamInertia * deltaTime;
+        _appliedTorque          =  0;
+        transform.localRotation =  Quaternion.AngleAxis(angle, transform.up);
 
-        if (suspension.contacting) {
+        // Handle friction forces
+        if (suspension.contacting && !Approximately(0, FrictionLimit)) {
             var axleVelocity           = vehicle.Rigidbody.GetPointVelocity(transform.position);
             var longitudinalAxleSpeed  = Vector3.Dot(axleVelocity, LongitudinalDirection);
             var lateralAxleSpeed       = Vector3.Dot(axleVelocity, transform.right);
@@ -106,10 +113,12 @@ public class Wheel : VehicleNodeWithTorque {
             var suspensionForceMag  = suspension.lastForce.magnitude;
             var longitudinalSimple  = relativeGroundVelocity * UpstreamInertia / (radius * radius) / deltaTime;
             var longitudinalPacejka = suspensionForceMag * Pacejka(LongitudinalSlipRatio, bStiffness, CShapeLongitudinal, dPeak, eCurvature);
-            longitudinalPacejka = Min(Abs(longitudinalPacejka), Abs(longitudinalSimple)) * Sign(longitudinalPacejka);
+            longitudinalPacejka *= frictionCoefficient;
+            longitudinalPacejka =  Min(Abs(longitudinalPacejka), Abs(longitudinalSimple)) * Sign(longitudinalPacejka);
             var lateralGravityForce = -Vector3.Dot(Physics.gravity.normalized, transform.right) * suspensionForceMag;
-            var lateralSimple       = (suspensionForceMag * -lateralAxleSpeed) + lateralGravityForce;
+            var lateralSimple       = suspensionForceMag * -lateralAxleSpeed + lateralGravityForce;
             var lateralPacejka      = suspensionForceMag * Pacejka(LateralSlipAngle, bStiffnessLateral, CShapeLateral, dPeakLateral, eCurvatureLateral);
+            lateralPacejka *= frictionCoefficient;
             lateralPacejka += lateralGravityForce;
             // lateralPacejka =  Min(Abs(lateralPacejka), Abs(lateralSimple)) * Sign(lateralPacejka);
 
@@ -135,10 +144,6 @@ public class Wheel : VehicleNodeWithTorque {
             if (steering) steering.ApplyDownstreamTorque(-aligningTorque * Abs(lateralAxleSpeed), TorqueMode.Force);
         }
 
-        // Wheel torque
-        AngularVelocity += _appliedTorque / UpstreamInertia * deltaTime;
-        _appliedTorque  =  0;
-
         // Axle friction
         // TODO: Without axle friction the wheel slowly accelerates
         // AngularMomentum -= Clamp(axleFrictionForce * deltaTime, 0, Abs(AngularMomentum)) * Sign(AngularMomentum);
@@ -150,11 +155,20 @@ public class Wheel : VehicleNodeWithTorque {
         }
 
         // Update rotation and visual
-        rotation                  += AngularVelocity * deltaTime;
-        visual.transform.rotation =  WheelRotation;
+        _lastRotation       =  rotation;
+        _rotationUpdateTime =  Time.realtimeSinceStartup;
+        rotation            += AngularVelocity * deltaTime;
 
         stopwatch.Stop();
         vehicle.wheelTime += (float)stopwatch.Elapsed.TotalMilliseconds;
+    }
+
+    private void LateUpdate() {
+        if (visual)
+            visual.transform.localRotation = Quaternion.AngleAxis(
+                Lerp(_lastRotation, rotation, (Time.realtimeSinceStartup - _rotationUpdateTime) / Time.fixedDeltaTime) * Rad2Deg,
+                Vector3.right
+            );
     }
 
     /// <summary>
@@ -229,7 +243,8 @@ public class Wheel : VehicleNodeWithTorque {
     private void OnDrawGizmosSelected() {
         Handles.color = Color.red;
         Handles.DrawWireDisc(transform.position, transform.right, radius, 2f);
-        Handles.DrawLine(transform.position, transform.position + WheelRotation * Vector3.forward * radius, 2f);
+        var wheelRotation = transform.rotation * Quaternion.AngleAxis(rotation * Rad2Deg, Vector3.right);
+        Handles.DrawLine(transform.position, transform.position + wheelRotation * Vector3.forward * radius, 2f);
 
         // Forces
         if (suspension && suspension.contacting) {
