@@ -36,7 +36,10 @@ public class Engine : VehicleNodeWithTorque {
         var throttle                    = Rpm > limitRpm ? 0 : Lerp(idleThrottle, 1, throttleInput.ReadFloat());
         var torque                      = SimpleThrottleModel(throttle);
         var systemAngularMomentum       = GetDownstreamAngularVelocity() * GetInertia(InertiaFrom.Input, InertiaDirection.Downstream);
-        var frictionTorque              = Clamp(frictionForce * deltaTime, 0, Abs(systemAngularMomentum)) * -Sign(systemAngularMomentum) / deltaTime;
+        
+        // Friction is calculated usin RPM since it is not just friction, it's also mechanical losses which scales with RPM
+        var frictionTorque              = Clamp(frictionForce * deltaTime * Rpm, 0, Abs(systemAngularMomentum)) * -Sign(systemAngularMomentum) / deltaTime;
+        
         ApplyDownstreamTorque(torque + frictionTorque, TorqueMode.Force);
 
         stopwatch.Stop();

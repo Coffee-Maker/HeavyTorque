@@ -4766,7 +4766,7 @@ MonoBehaviour:
     m_PostInfinity: 2
     m_RotationOrder: 4
   inertia: 0.15
-  frictionForce: 0
+  frictionForce: 0.01
   idleRpm: 670
   limitRpm: 7000
   throttleInput: {fileID: 3584263051762060832}
